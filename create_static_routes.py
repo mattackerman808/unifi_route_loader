@@ -174,7 +174,10 @@ class UniFiController:
                           nexthop: Optional[str] = None,
                           interface: Optional[str] = None,
                           distance: int = 1,
-                          enabled: bool = True) -> Optional[Dict]:
+                          enabled: bool = True,
+                          skip_duplicates: bool = True,
+                          cached_routes: Optional[List[Dict]] = None,
+                          cached_interface_id: Optional[str] = None) -> Optional[Dict]:
         """
         Create a static route
 
@@ -185,9 +188,13 @@ class UniFiController:
             interface: WAN interface name (e.g., 'wan', 'wan2') - required if nexthop not specified
             distance: Administrative distance (default: 1)
             enabled: Enable the route (default: True)
+            skip_duplicates: Skip creation if route already exists (default: True)
+            cached_routes: Optional pre-fetched routes list to avoid repeated API calls
+            cached_interface_id: Optional pre-fetched interface ID to avoid repeated lookups
 
         Returns:
             Dict containing the created route data, or None if failed
+            Returns special dict {'skipped': True} if duplicate was skipped
         """
         if not self.logged_in:
             print("✗ Not logged in. Please login first.")
@@ -203,12 +210,25 @@ class UniFiController:
             print("✗ Network must be in CIDR notation (e.g., 10.0.0.0/24)")
             return None
 
+        # Check for duplicate route (pass cached data for performance)
+        if skip_duplicates and self.route_exists(
+            network=network,
+            nexthop=nexthop,
+            interface=interface,
+            cached_routes=cached_routes,
+            cached_interface_id=cached_interface_id
+        ):
+            route_via = f"nexthop {nexthop}" if nexthop else f"interface {interface}"
+            print(f"⊘ Route already exists: {network} via {route_via} (skipping)")
+            return {'skipped': True}
+
         url = self._get_api_url(f"/api/s/{self.site}/rest/routing")
 
         # Build payload based on route type
         if interface:
             # For interface-based routes, we need the interface ID
-            interface_id = self.get_interface_id(interface)
+            # Use cached interface ID if provided, otherwise fetch it
+            interface_id = cached_interface_id if cached_interface_id is not None else self.get_interface_id(interface)
             if not interface_id:
                 print(f"✗ Could not find interface '{interface}'. Route creation aborted.")
                 return None
@@ -438,6 +458,64 @@ class UniFiController:
             print(f"✗ Error listing routes: {e}")
             return None
 
+    def route_exists(self,
+                     network: str,
+                     nexthop: Optional[str] = None,
+                     interface: Optional[str] = None,
+                     cached_routes: Optional[List[Dict]] = None,
+                     cached_interface_id: Optional[str] = None) -> bool:
+        """
+        Check if a route already exists for the given network and gateway
+
+        Args:
+            network: Destination network in CIDR notation (e.g., '10.0.0.0/24')
+            nexthop: Next hop IP address (gateway) to match
+            interface: WAN interface name to match
+            cached_routes: Optional pre-fetched routes list to avoid repeated API calls
+            cached_interface_id: Optional pre-fetched interface ID to avoid repeated lookups
+
+        Returns:
+            bool: True if route exists, False otherwise
+        """
+        # Use cached routes if provided, otherwise fetch from API
+        routes = cached_routes if cached_routes is not None else self.list_static_routes()
+        if not routes:
+            return False
+
+        # Normalize the network for comparison
+        # For nexthop routes, we need to compare just the network address
+        if nexthop:
+            # Extract network address from CIDR
+            network_addr = network.split('/')[0] if '/' in network else network
+        else:
+            # For interface routes, compare the full CIDR
+            network_addr = network
+
+        for route in routes:
+            if route.get('type') != 'static-route':
+                continue
+
+            route_type = route.get('static-route_type', '')
+            route_network = route.get('static-route_network', '')
+
+            # Check if nexthop-based route exists
+            if nexthop and route_type == 'nexthop-route':
+                route_nexthop = route.get('static-route_nexthop', '')
+                # Compare network address and nexthop
+                if route_network == network_addr and route_nexthop == nexthop:
+                    return True
+
+            # Check if interface-based route exists
+            elif interface and route_type == 'interface-route':
+                # Use cached interface ID if provided, otherwise fetch it
+                interface_id = cached_interface_id if cached_interface_id is not None else self.get_interface_id(interface)
+                route_interface = route.get('static-route_interface', '')
+                # Compare full CIDR network and interface
+                if route_network == network and route_interface == interface_id:
+                    return True
+
+        return False
+
     def delete_static_route(self, route_id: str) -> bool:
         """
         Delete a static route by ID
@@ -614,12 +692,26 @@ Configuration:
             else:
                 gateway_display = f"nexthop: {args.nexthop}"
 
+            # Pre-fetch data once for performance optimization
+            print(f"\nFetching existing routes...")
+            cached_routes = controller.list_static_routes()
+
+            # Pre-fetch interface ID if using interface-based routing
+            cached_interface_id = None
+            if args.wan_interface:
+                print(f"Resolving interface '{args.wan_interface}'...")
+                cached_interface_id = controller.get_interface_id(args.wan_interface)
+                if not cached_interface_id:
+                    print(f"✗ Could not find interface '{args.wan_interface}'")
+                    sys.exit(1)
+
             # Create routes for each network
             print(f"\nCreating routes with {gateway_display}")
             print(f"Base route name: '{args.route_name}'")
             print(f"Administrative distance: {args.distance}\n")
 
             success_count = 0
+            skipped_count = 0
             for idx, network in enumerate(networks, start=1):
                 route_name = f"{args.route_name} {idx}"
                 result = controller.create_static_route(
@@ -627,12 +719,19 @@ Configuration:
                     name=route_name,
                     nexthop=args.nexthop,
                     interface=args.wan_interface,
-                    distance=args.distance
+                    distance=args.distance,
+                    cached_routes=cached_routes,
+                    cached_interface_id=cached_interface_id
                 )
                 if result:
-                    success_count += 1
+                    if result.get('skipped'):
+                        skipped_count += 1
+                    else:
+                        success_count += 1
 
             print(f"\n✓ Successfully created {success_count}/{len(networks)} route(s)")
+            if skipped_count > 0:
+                print(f"⊘ Skipped {skipped_count} duplicate route(s)")
 
     finally:
         # Logout
