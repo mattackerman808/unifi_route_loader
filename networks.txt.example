@@ -1,0 +1,12 @@
+# Example networks file for UniFi static routes
+# One network per line in CIDR notation
+# Lines starting with # are comments and will be ignored
+
+# Private network ranges
+10.10.0.0/24
+172.16.0.0/16
+192.168.100.0/24
+
+# Additional subnets
+10.20.0.0/22
+10.30.0.0/24
