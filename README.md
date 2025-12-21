@@ -16,6 +16,7 @@ The script automatically detects your controller type and uses the correct API e
 - Support for self-signed certificates
 - Batch route creation with automatic numbering
 - Command-line interface
+- Configuration file support with encrypted passwords
 
 ## Installation
 
@@ -25,6 +26,86 @@ pip install -r requirements.txt
 ```
 
 ## Usage
+
+### Using a Configuration File (Recommended)
+
+You can store all your settings in a YAML configuration file for easier management and automation.
+
+#### Step 1: Generate an Encrypted Password
+
+Run the password encryption utility:
+
+```bash
+python encrypt_password.py
+```
+
+The utility will:
+1. Prompt you to enter your password (securely, without echoing)
+2. Create an encryption key in `~/.unifi_route_loader.key`
+3. Display the encrypted password string
+
+Example output:
+```
+UniFi Route Loader - Password Encryption Utility
+==================================================
+
+This utility will encrypt your password for use in the config file.
+The encryption key will be stored securely in your home directory.
+
+Enter password to encrypt: [hidden]
+Confirm password: [hidden]
+
+✓ Password encrypted successfully!
+
+Add this line to your config.yaml file:
+--------------------------------------------------
+password_encrypted: gAAAAABm...your_encrypted_password_here...
+--------------------------------------------------
+```
+
+#### Step 2: Create Your Config File
+
+Create a `config.yaml` file (see `config.yaml.example` for reference):
+
+```yaml
+# Required settings
+file: networks.txt
+route_name: VPN Route
+
+# Gateway (choose one)
+nexthop: 192.168.1.254
+# wan_interface: wan2
+
+# Connection settings
+host: 192.168.1.1
+username: admin
+port: 443
+site: default
+
+# Encrypted password (from step 1)
+password_encrypted: gAAAAABm...your_encrypted_password_here...
+
+# Optional settings
+distance: 1
+list_only: false
+debug: false
+```
+
+#### Step 3: Run with Config File
+
+```bash
+python create_static_routes.py --config config.yaml
+```
+
+You can override any config file setting with command line options:
+
+```bash
+# Use config file but override the route name
+python create_static_routes.py --config config.yaml -r "Different Route Name"
+
+# Use config file but enable debug mode
+python create_static_routes.py --config config.yaml --debug
+```
 
 ### Basic Syntax
 
@@ -52,6 +133,7 @@ python create_static_routes.py -f <networks_file> -w <wan_interface> -r <route_n
 
 ### Optional Arguments
 
+- `--config`: Path to YAML configuration file
 - `--password`: Admin password (will prompt securely if not provided)
 - `--host`: UniFi controller hostname or IP (default: 192.168.1.1)
 - `--username`: Admin username (default: admin)
@@ -180,6 +262,59 @@ Create a text file with one network per line in CIDR notation:
 # Empty lines are also ignored
 10.20.0.0/22
 ```
+
+## Password Security
+
+The script offers three methods for password handling, listed from most to least secure:
+
+### 1. Encrypted Password in Config File (Most Secure for Automation)
+
+Use the `encrypt_password.py` utility to generate an encrypted password:
+
+```bash
+python encrypt_password.py
+```
+
+Add the encrypted password to your config file:
+
+```yaml
+password_encrypted: gAAAAABm...encrypted_string_here...
+```
+
+**Security Notes:**
+- The encryption key is stored in `~/.unifi_route_loader.key` with 0600 permissions
+- Only works on the same system with the same encryption key
+- Safe to commit the config file (with encrypted password) to version control
+- Do NOT commit the `.key` file to version control
+
+### 2. Interactive Password Prompt (Most Secure for Manual Use)
+
+Simply omit the password from both command line and config file:
+
+```bash
+python create_static_routes.py --config config.yaml
+# Will prompt: Password for admin@192.168.1.1:
+```
+
+This method prevents passwords from appearing in:
+- Shell command history
+- Process listings
+- Log files
+- Screen captures
+
+### 3. Plain Text Password (Least Secure - Not Recommended)
+
+For testing only:
+
+```bash
+# Command line (visible in history and process list)
+python create_static_routes.py -f networks.txt -n 192.168.1.254 -r "VPN" --password mypassword
+
+# Config file (visible to anyone with file access)
+password: mypassword
+```
+
+**Warning:** Only use this for testing. Passwords will be visible in command history, process listings, and files.
 
 ## Command Line Help
 

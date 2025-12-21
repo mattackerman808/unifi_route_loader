@@ -11,6 +11,9 @@ import argparse
 import sys
 import getpass
 import base64
+import yaml
+import os
+from cryptography.fernet import Fernet
 from typing import Optional, Dict, List
 
 # Disable SSL warnings for self-signed certificates
@@ -578,6 +581,101 @@ def read_networks_from_file(filename: str) -> List[str]:
         sys.exit(1)
 
 
+def get_encryption_key() -> bytes:
+    """
+    Get or create encryption key for password encryption
+
+    Returns:
+        Encryption key bytes
+    """
+    key_file = os.path.expanduser('~/.unifi_route_loader.key')
+
+    if os.path.exists(key_file):
+        with open(key_file, 'rb') as f:
+            return f.read()
+    else:
+        # Generate new key
+        key = Fernet.generate_key()
+        with open(key_file, 'wb') as f:
+            f.write(key)
+        os.chmod(key_file, 0o600)  # Secure permissions
+        return key
+
+
+def encrypt_password(password: str) -> str:
+    """
+    Encrypt a password for storage in config file
+
+    Args:
+        password: Plain text password
+
+    Returns:
+        Encrypted password string (base64 encoded)
+    """
+    key = get_encryption_key()
+    f = Fernet(key)
+    encrypted = f.encrypt(password.encode())
+    return encrypted.decode()
+
+
+def decrypt_password(encrypted_password: str) -> str:
+    """
+    Decrypt an encrypted password from config file
+
+    Args:
+        encrypted_password: Encrypted password string
+
+    Returns:
+        Plain text password
+    """
+    try:
+        key = get_encryption_key()
+        f = Fernet(key)
+        decrypted = f.decrypt(encrypted_password.encode())
+        return decrypted.decode()
+    except Exception as e:
+        print(f"✗ Error decrypting password: {e}")
+        print(f"This may happen if the encryption key has changed.")
+        print(f"You may need to regenerate your encrypted password.")
+        sys.exit(1)
+
+
+def load_config_file(config_path: str) -> Dict:
+    """
+    Load configuration from YAML file
+
+    Args:
+        config_path: Path to YAML config file
+
+    Returns:
+        Dictionary of configuration options
+    """
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+
+        if not config:
+            print(f"✗ Error: Config file '{config_path}' is empty")
+            sys.exit(1)
+
+        # Decrypt password if it's encrypted
+        if 'password_encrypted' in config:
+            config['password'] = decrypt_password(config['password_encrypted'])
+            del config['password_encrypted']
+
+        return config
+    except FileNotFoundError:
+        print(f"✗ Error: Config file '{config_path}' not found")
+        sys.exit(1)
+    except yaml.YAMLError as e:
+        print(f"✗ Error parsing YAML config file: {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"✗ Error reading config file: {e}")
+        sys.exit(1)
+
+
+
 def main():
     """Main function with command line argument parsing"""
 
@@ -595,37 +693,45 @@ Examples:
   # With custom distance
   %(prog)s -f networks.txt -n 10.0.0.1 -r "Office" -d 10
 
+  # Using a config file
+  %(prog)s --config config.yaml
+
 Configuration:
   You must specify either --nexthop (IP address) or --wan-interface (interface name)
   Password will be prompted securely if not provided via --password
+  Config file can contain all command line options in YAML format
         """
     )
 
-    # Required arguments
-    parser.add_argument('-f', '--file', required=True,
+    # Config file option
+    parser.add_argument('--config',
+                        help='Path to YAML configuration file')
+
+    # Required arguments (not required if using config file)
+    parser.add_argument('-f', '--file',
                         help='Text file containing networks in CIDR notation (one per line)')
-    parser.add_argument('-r', '--route-name', required=True,
+    parser.add_argument('-r', '--route-name', dest='route_name',
                         help='Base name for routes (will append numbers: "Name 1", "Name 2", etc.)')
 
     # Gateway options (mutually exclusive group)
-    gateway_group = parser.add_mutually_exclusive_group(required=True)
+    gateway_group = parser.add_mutually_exclusive_group()
     gateway_group.add_argument('-n', '--nexthop',
                         help='Next hop IP address (gateway) for all routes')
-    gateway_group.add_argument('-w', '--wan-interface',
+    gateway_group.add_argument('-w', '--wan-interface', dest='wan_interface',
                         help='WAN interface name for all routes (e.g., "wan", "wan2")')
 
     # Optional arguments
-    parser.add_argument('--host', default='192.168.1.1',
+    parser.add_argument('--host',
                         help='UniFi controller hostname or IP (default: 192.168.1.1)')
-    parser.add_argument('--username', default='admin',
+    parser.add_argument('--username',
                         help='Admin username (default: admin)')
     parser.add_argument('--password',
                         help='Admin password (will prompt if not provided)')
-    parser.add_argument('--site', default='default',
+    parser.add_argument('--site',
                         help='Site name (default: default)')
-    parser.add_argument('-d', '--distance', type=int, default=1,
+    parser.add_argument('-d', '--distance', type=int,
                         help='Administrative distance for routes (default: 1)')
-    parser.add_argument('--port', type=int, default=443,
+    parser.add_argument('--port', type=int,
                         help='Controller port (default: 443)')
     parser.add_argument('--list-only', action='store_true',
                         help='Only list existing routes without creating new ones')
@@ -633,6 +739,77 @@ Configuration:
                         help='Show detailed debug information including API responses')
 
     args = parser.parse_args()
+
+    # Load config file if specified
+    config = {}
+    if args.config:
+        config = load_config_file(args.config)
+
+    # Merge config file with command line arguments (command line takes precedence)
+    # Build final configuration by combining defaults, config file, and command line args
+    final_config = {
+        'host': '192.168.1.1',
+        'username': 'admin',
+        'site': 'default',
+        'distance': 1,
+        'port': 443,
+        'list_only': False,
+        'debug': False,
+    }
+
+    # Update with config file values
+    final_config.update(config)
+
+    # Update with command line arguments (only if explicitly provided)
+    if args.file is not None:
+        final_config['file'] = args.file
+    if args.route_name is not None:
+        final_config['route_name'] = args.route_name
+    if args.nexthop is not None:
+        final_config['nexthop'] = args.nexthop
+    if args.wan_interface is not None:
+        final_config['wan_interface'] = args.wan_interface
+    if args.host is not None:
+        final_config['host'] = args.host
+    if args.username is not None:
+        final_config['username'] = args.username
+    if args.password is not None:
+        final_config['password'] = args.password
+    if args.site is not None:
+        final_config['site'] = args.site
+    if args.distance is not None:
+        final_config['distance'] = args.distance
+    if args.port is not None:
+        final_config['port'] = args.port
+    if args.list_only:
+        final_config['list_only'] = args.list_only
+    if args.debug:
+        final_config['debug'] = args.debug
+
+    # Validate required arguments
+    if 'file' not in final_config:
+        print("✗ Error: --file is required (or specify in config file)")
+        sys.exit(1)
+    if 'route_name' not in final_config:
+        print("✗ Error: --route-name is required (or specify in config file)")
+        sys.exit(1)
+    if 'nexthop' not in final_config and 'wan_interface' not in final_config:
+        print("✗ Error: Either --nexthop or --wan-interface is required (or specify in config file)")
+        sys.exit(1)
+
+    # Convert to namespace for backward compatibility
+    class Config:
+        pass
+
+    args = Config()
+    for key, value in final_config.items():
+        setattr(args, key, value)
+
+    # Set None for nexthop/wan_interface if not specified
+    if not hasattr(args, 'nexthop'):
+        args.nexthop = None
+    if not hasattr(args, 'wan_interface'):
+        args.wan_interface = None
 
     # Prompt for password if not provided
     if not args.password:
