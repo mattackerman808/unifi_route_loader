@@ -1,0 +1,37 @@
+# UniFi Route Loader Configuration File Example
+# All command line options can be specified here
+# Command line options will override config file values
+
+# Required: Path to file containing networks in CIDR notation
+file: networks.txt
+
+# Required: Base name for routes (numbers will be appended)
+route_name: VPN Route
+
+# Gateway Configuration (choose ONE of the following):
+# Option 1: Use nexthop IP address
+nexthop: 192.168.1.254
+
+# Option 2: Use WAN interface (comment out nexthop if using this)
+# wan_interface: wan2
+
+# UniFi Controller Connection Settings
+host: 192.168.1.1
+username: admin
+port: 443
+site: default
+
+# Password Configuration (choose ONE of the following):
+# Option 1: Plain text password (NOT RECOMMENDED for security)
+# password: mypassword
+
+# Option 2: Encrypted password (RECOMMENDED)
+# Generate using: python encrypt_password.py
+# password_encrypted: gAAAAABm...encrypted_string_here...
+
+# Route Configuration
+distance: 1
+
+# Optional Flags
+list_only: false
+debug: false
