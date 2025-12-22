@@ -21,14 +21,15 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class UniFiController:
-    def __init__(self, host: str, username: str, password: str, port: int = 443, site: str = 'default', verify_ssl: bool = False, unifios: bool = False):
+    def __init__(self, host: str, username: str = None, password: str = None, api_key: str = None, port: int = 443, site: str = 'default', verify_ssl: bool = False, unifios: bool = False):
         """
         Initialize UniFi Controller connection
 
         Args:
             host: Controller hostname or IP address
-            username: Admin username
-            password: Admin password
+            username: Admin username (not required if using api_key)
+            password: Admin password (not required if using api_key)
+            api_key: API key for authentication (alternative to username/password)
             port: Controller port (default: 443)
             site: Site name (default: 'default')
             verify_ssl: Verify SSL certificate (default: False)
@@ -38,6 +39,7 @@ class UniFiController:
         self.port = port
         self.username = username
         self.password = password
+        self.api_key = api_key
         self.site = site
         self.verify_ssl = verify_ssl
         self.base_url = f"https://{host}:{port}"
@@ -46,6 +48,13 @@ class UniFiController:
         self.logged_in = False
         self.is_unifios = unifios
         self.csrf_token = None
+
+        # If using API key, set it in session headers and mark as logged in
+        if self.api_key:
+            self.session.headers.update({'X-API-KEY': self.api_key, 'Accept': 'application/json'})
+            self.logged_in = True
+            # API keys work with UniFi OS endpoints
+            self.is_unifios = True
 
     def _extract_csrf_token(self) -> Optional[str]:
         """
@@ -89,6 +98,11 @@ class UniFiController:
         Returns:
             bool: True if login successful, False otherwise
         """
+        # Skip login if using API key
+        if self.api_key:
+            print(f"✓ Using API key authentication for {self.host}")
+            return True
+
         # Try UniFi OS endpoint first (UDM, UDM-Pro, Cloud Key Gen2+)
         login_endpoints = [
             ("/api/auth/login", True),   # UniFi OS
@@ -272,9 +286,9 @@ class UniFiController:
             route_via = f"nexthop {nexthop}"
 
         try:
-            # Add CSRF token header for UniFi OS
+            # Add CSRF token header for UniFi OS (only when using username/password auth)
             headers = {}
-            if self.is_unifios and self.csrf_token:
+            if self.is_unifios and self.csrf_token and not self.api_key:
                 headers['X-CSRF-Token'] = self.csrf_token
 
             response = self.session.post(url, json=payload, headers=headers)
@@ -726,7 +740,9 @@ Configuration:
     parser.add_argument('--username',
                         help='Admin username (default: admin)')
     parser.add_argument('--password',
-                        help='Admin password (will prompt if not provided)')
+                        help='Admin password (will prompt if not provided and no API key)')
+    parser.add_argument('--api-key', dest='api_key',
+                        help='API key for authentication (alternative to username/password)')
     parser.add_argument('--site',
                         help='Site name (default: default)')
     parser.add_argument('-d', '--distance', type=int,
@@ -775,6 +791,8 @@ Configuration:
         final_config['username'] = args.username
     if args.password is not None:
         final_config['password'] = args.password
+    if args.api_key is not None:
+        final_config['api_key'] = args.api_key
     if args.site is not None:
         final_config['site'] = args.site
     if args.distance is not None:
@@ -810,9 +828,11 @@ Configuration:
         args.nexthop = None
     if not hasattr(args, 'wan_interface'):
         args.wan_interface = None
+    if not hasattr(args, 'api_key'):
+        args.api_key = None
 
-    # Prompt for password if not provided
-    if not args.password:
+    # Prompt for password if not provided and not using API key
+    if not args.password and not args.api_key:
         args.password = getpass.getpass(f"Password for {args.username}@{args.host}: ")
 
     # Read networks from file
@@ -830,6 +850,7 @@ Configuration:
         host=args.host,
         username=args.username,
         password=args.password,
+        api_key=args.api_key,
         site=args.site,
         port=args.port
     )

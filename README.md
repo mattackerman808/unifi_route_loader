@@ -10,13 +10,13 @@ The script automatically detects your controller type and uses the correct API e
 
 ## Features
 
-- Authenticate with UniFi Controller
+- Authenticate with UniFi Controller (username/password or API key)
 - Create static routes from a text file with CIDR notation
 - List existing static routes
 - Support for self-signed certificates
 - Batch route creation with automatic numbering
 - Command-line interface
-- Configuration file support with encrypted passwords
+- Configuration file support with encrypted passwords or API keys
 
 ## Installation
 
@@ -31,7 +31,51 @@ pip install -r requirements.txt
 
 You can store all your settings in a YAML configuration file for easier management and automation.
 
-#### Step 1: Generate an Encrypted Password
+#### Authentication Options
+
+The script supports two authentication methods:
+
+**Option 1: API Key Authentication (Recommended)**
+
+API keys provide better security and access control without storing passwords.
+
+1. Generate an API key in your UniFi controller:
+   - Go to **Settings** → **Admins & Users** → **API**
+   - Create a new API key
+   - Copy the generated key (e.g., `LoTQgF3A2Hspj_7BPkGmyqJ1DNrkH6-n`)
+
+2. Create your `config.yaml` file:
+```yaml
+# Required settings
+file: networks.txt
+route_name: VPN Route
+
+# Gateway (choose one)
+nexthop: 192.168.1.254
+# wan_interface: wan2
+
+# Connection settings
+host: 192.168.77.1
+port: 443
+site: default
+
+# API Key Authentication
+api_key: LoTQgF3A2Hspj_7BPkGmyqJ1DNrkH6-n
+
+# Optional settings
+distance: 1
+```
+
+3. Run with the config file:
+```bash
+python create_static_routes.py --config config.yaml
+```
+
+**Option 2: Username/Password Authentication**
+
+For username/password authentication, you can use encrypted passwords for better security:
+
+1. Generate an encrypted password:
 
 Run the password encryption utility:
 
@@ -63,7 +107,7 @@ password_encrypted: gAAAAABm...your_encrypted_password_here...
 --------------------------------------------------
 ```
 
-#### Step 2: Create Your Config File
+2. Create your config file:
 
 Create a `config.yaml` file (see `config.yaml.example` for reference):
 
@@ -91,7 +135,7 @@ list_only: false
 debug: false
 ```
 
-#### Step 3: Run with Config File
+3. Run with the config file:
 
 ```bash
 python create_static_routes.py --config config.yaml
@@ -134,6 +178,7 @@ python create_static_routes.py -f <networks_file> -w <wan_interface> -r <route_n
 ### Optional Arguments
 
 - `--config`: Path to YAML configuration file
+- `--api-key`: API key for authentication (alternative to username/password)
 - `--password`: Admin password (will prompt securely if not provided)
 - `--host`: UniFi controller hostname or IP (default: 192.168.1.1)
 - `--username`: Admin username (default: admin)
@@ -249,6 +294,34 @@ python create_static_routes.py \
 
 **Warning:** Passwords on command line may be visible in process lists and shell history.
 
+### Using API Key Authentication
+
+Using an API key is the most secure method and recommended for automation:
+
+```bash
+python create_static_routes.py \
+  -f networks.txt \
+  -n 192.168.1.254 \
+  -r "VPN Route" \
+  --host 192.168.77.1 \
+  --api-key LoTQgF3A2Hspj_7BPkGmyqJ1DNrkH6-n
+```
+
+Or better yet, use a config file with the API key:
+
+```yaml
+file: networks.txt
+route_name: VPN Route
+nexthop: 192.168.1.254
+host: 192.168.77.1
+api_key: LoTQgF3A2Hspj_7BPkGmyqJ1DNrkH6-n
+```
+
+Then run:
+```bash
+python create_static_routes.py --config config.yaml
+```
+
 ## Networks File Format
 
 Create a text file with one network per line in CIDR notation:
@@ -263,11 +336,37 @@ Create a text file with one network per line in CIDR notation:
 10.20.0.0/22
 ```
 
-## Password Security
+## Authentication Security
 
-The script offers three methods for password handling, listed from most to least secure:
+The script offers multiple authentication methods, listed from most to least secure:
 
-### 1. Encrypted Password in Config File (Most Secure for Automation)
+### 1. API Key Authentication (Most Secure)
+
+Use API keys generated through the UniFi controller interface:
+
+```bash
+python create_static_routes.py --config config.yaml --api-key LoTQgF3A2Hspj_7BPkGmyqJ1DNrkH6-n
+```
+
+Or in your config file:
+```yaml
+api_key: LoTQgF3A2Hspj_7BPkGmyqJ1DNrkH6-n
+```
+
+**Benefits:**
+- No password storage required
+- Fine-grained access control through the UniFi controller
+- Easy to rotate or revoke without changing passwords
+- Works with UniFi OS (UDM, UDM-Pro, etc.)
+- Safe to use in automation scripts
+
+**To generate an API key:**
+1. Log into your UniFi controller web interface
+2. Navigate to **Settings** → **Admins & Users** → **API**
+3. Click **Create New API Key**
+4. Copy the generated key and use it in your config file or command line
+
+### 2. Encrypted Password in Config File (Secure for Automation)
 
 Use the `encrypt_password.py` utility to generate an encrypted password:
 
@@ -287,7 +386,7 @@ password_encrypted: gAAAAABm...encrypted_string_here...
 - Safe to commit the config file (with encrypted password) to version control
 - Do NOT commit the `.key` file to version control
 
-### 2. Interactive Password Prompt (Most Secure for Manual Use)
+### 3. Interactive Password Prompt (Secure for Manual Use)
 
 Simply omit the password from both command line and config file:
 
@@ -302,7 +401,7 @@ This method prevents passwords from appearing in:
 - Log files
 - Screen captures
 
-### 3. Plain Text Password (Least Secure - Not Recommended)
+### 4. Plain Text Password (Least Secure - Not Recommended)
 
 For testing only:
 
