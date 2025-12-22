@@ -830,6 +830,8 @@ Configuration:
         args.wan_interface = None
     if not hasattr(args, 'api_key'):
         args.api_key = None
+    if not hasattr(args, 'password'):
+        args.password = None
 
     # Prompt for password if not provided and not using API key
     if not args.password and not args.api_key:
