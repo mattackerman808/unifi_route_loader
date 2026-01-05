@@ -2,8 +2,10 @@
 """
 Password Encryption Utility for UniFi Route Loader
 
-This utility encrypts passwords for use in the config file.
-The encrypted password can be safely stored in a config file.
+Encrypts passwords for secure storage in configuration files.
+
+Copyright (c) 2026 UniFi Static Route Manager Contributors
+Licensed under the MIT License
 """
 
 import os

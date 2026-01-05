@@ -1,51 +1,49 @@
-# UniFi Route Loader Configuration File Example
+# UniFi Route Loader Configuration File
+# Copyright (c) 2026 UniFi Static Route Manager Contributors
 # All command line options can be specified here
 # Command line options will override config file values
 
-# Required: Path to file containing networks in CIDR notation
+# Required Settings
 file: networks.txt
-
-# Required: Base name for routes (numbers will be appended)
 route_name: VPN Route
 
-# Gateway Configuration (choose ONE of the following):
-# Option 1: Use nexthop IP address
+# Gateway Configuration (choose ONE):
+# Option 1: Nexthop IP address
 nexthop: 192.168.1.254
 
-# Option 2: Use WAN interface (comment out nexthop if using this)
+# Option 2: WAN interface (comment out nexthop if using this)
 # wan_interface: wan2
 
-# UniFi Controller Connection Settings
+# Controller Connection
 host: 192.168.1.1
 port: 443
 site: default
 
-# Authentication Configuration (choose ONE of the following):
-# Option 1: Username/Password Authentication
+# Authentication (choose ONE):
+
+# Option 1: API Key (RECOMMENDED for automation)
+# Generate: Settings > Admins & Users > API
+# api_key: your_api_key_here
+
+# Option 2: Encrypted Password (RECOMMENDED for scripts)
+# Generate: python encrypt_password.py
 username: admin
-# Password Configuration (choose ONE):
-# Option 1a: Plain text password (NOT RECOMMENDED for security)
+# password_encrypted: gAAAAABm...encrypted_string...
+
+# Option 3: Plain Text Password (NOT RECOMMENDED - testing only)
 # password: mypassword
-# Option 1b: Encrypted password (RECOMMENDED)
-# Generate using: python encrypt_password.py
-# password_encrypted: gAAAAABm...encrypted_string_here...
 
-# Option 2: API Key Authentication (RECOMMENDED)
-# Generate via UniFi controller UI: Settings > Admins & Users > API
-# api_key: [Your API Key here]
-
-# Route Configuration
+# Route Settings
 distance: 1
 
-# Optional Flags
+# Optional Features
 list_only: false
 debug: false
 
-# Route Removal Options (NEW)
-# Remove static routes not defined in the networks file
+# Route Removal (USE WITH CAUTION)
+# Dry-run mode (preview only)
 remove_unused: false
-# Actually remove routes (disables dry-run mode) - USE WITH CAUTION!
+# Actually remove routes (DANGEROUS)
 remove_unused_confirm: false
-# Only consider routes for removal that contain this text in their name
-# This is a safety feature to prevent accidental removal of unrelated routes
+# Safety filter - only remove routes matching this text
 route_name_filter: VPN Route

@@ -1,4 +1,5 @@
 # Example networks file for UniFi static routes
+# Copyright (c) 2026 UniFi Static Route Manager Contributors
 # One network per line in CIDR notation
 # Lines starting with # are comments and will be ignored
 

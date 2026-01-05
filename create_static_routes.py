@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
 UniFi Controller Static Route Manager
-Creates static routes via the UniFi Controller API
+Creates and manages static routes via the UniFi Controller API
+
+Copyright (c) 2026 UniFi Static Route Manager Contributors
+Licensed under the MIT License
 """
 
 import requests
@@ -673,27 +676,16 @@ def read_networks_from_file(filename: str) -> List[str]:
 
 def generate_route_prefix(network: str) -> str:
     """
-    Generate a unique prefix for a route based on the network address.
-    Uses a short hash of the network to ensure uniqueness and consistency.
+    Generate a unique 6-character prefix for a route based on network hash.
 
     Args:
         network: Network address in CIDR notation (e.g., '10.0.0.0/24')
 
     Returns:
-        Unique 6-character alphanumeric prefix (e.g., 'a3f9d2')
-
-    Examples:
-        >>> generate_route_prefix('10.0.0.0/24')
-        'a3f9d2'
-        >>> generate_route_prefix('192.168.1.0/24')
-        'b7e4c1'
+        6-character alphanumeric prefix for consistent route naming
     """
-    # Create SHA256 hash of the network string
     hash_obj = hashlib.sha256(network.encode('utf-8'))
-    # Take first 6 characters of the hex digest
-    prefix = hash_obj.hexdigest()[:6]
-    return prefix
-
+    return hash_obj.hexdigest()[:6]
 
 
 def get_encryption_key() -> bytes:

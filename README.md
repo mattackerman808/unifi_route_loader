@@ -1,602 +1,264 @@
 # UniFi Static Route Manager
 
-Python script to create and manage static routes on UniFi controllers via the API using command line arguments.
+A production-ready Python tool for creating and managing static routes on UniFi controllers via the API.
 
 **Compatible with:**
-- Legacy UniFi Controllers
 - UniFi OS (UDM, UDM-Pro, UDR, Cloud Key Gen2+)
+- Legacy UniFi Controllers
 
 The script automatically detects your controller type and uses the correct API endpoints.
 
 ## Features
 
-- Authenticate with UniFi Controller (username/password or API key)
-- Create static routes from a text file with CIDR notation
-- **Remove unused static routes** (not defined in the networks file)
+- Create static routes from a text file (CIDR notation)
+- Remove unused static routes with dry-run safety mode
 - List existing static routes
-- Support for self-signed certificates
-- Batch route creation with unique prefix generation
-- **Dry-run mode for safe route removal preview**
-- **Route name filtering for safe removal operations**
-- Command-line interface
-- Configuration file support with encrypted passwords or API keys
+- Support for both nexthop and interface-based routing
+- Authenticate via username/password or API key
+- Configuration file support with encrypted passwords
+- Automatic unique route naming with hash-based prefixes
+- Batch route creation with duplicate detection
+- Self-signed certificate support
 
 ## Installation
 
-Install required dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-## Usage
+## Quick Start
+
+Create a networks file (`networks.txt`) with one CIDR network per line:
+```
+10.10.0.0/24
+172.16.0.0/16
+192.168.100.0/24
+```
+
+Run the script (will prompt securely for password):
+```bash
+python create_static_routes.py -f networks.txt -n 192.168.1.254 -r "VPN Route"
+```
+
+## Configuration
 
 ### Using a Configuration File (Recommended)
 
-You can store all your settings in a YAML configuration file for easier management and automation.
+Store settings in a YAML configuration file for easier management and automation.
 
-#### Authentication Options
+**Option 1: API Key Authentication (Most Secure)**
 
-The script supports two authentication methods:
+Generate an API key in your UniFi controller:
+- Go to **Settings** → **Admins & Users** → **API**
+- Create a new API key and copy it
 
-**Option 1: API Key Authentication (Recommended)**
-
-API keys provide better security and access control without storing passwords.
-
-1. Generate an API key in your UniFi controller:
-   - Go to **Settings** → **Admins & Users** → **API**
-   - Create a new API key
-   - Copy the generated key (e.g., `LoTQgF3A2Hspj_7BPkGmyqJ1DNrkH6-n`)
-
-2. Create your `config.yaml` file:
+Create `config.yaml`:
 ```yaml
-# Required settings
 file: networks.txt
 route_name: VPN Route
-
-# Gateway (choose one)
 nexthop: 192.168.1.254
-# wan_interface: wan2
-
-# Connection settings
-host: 192.168.77.1
+host: 192.168.1.1
 port: 443
 site: default
-
-# API Key Authentication
-api_key: LoTQgF3A2Hspj_7BPkGmyqJ1DNrkH6-n
-
-# Optional settings
+api_key: your_api_key_here
 distance: 1
 ```
 
-3. Run with the config file:
-```bash
-python create_static_routes.py --config config.yaml
-```
+**Option 2: Encrypted Password Authentication**
 
-**Option 2: Username/Password Authentication**
-
-For username/password authentication, you can use encrypted passwords for better security:
-
-1. Generate an encrypted password:
-
-Run the password encryption utility:
+For username/password authentication with encryption:
 
 ```bash
+# Generate encrypted password
 python encrypt_password.py
 ```
 
-The utility will:
-1. Prompt you to enter your password (securely, without echoing)
-2. Create an encryption key in `~/.unifi_route_loader.key`
-3. Display the encrypted password string
-
-Example output:
-```
-UniFi Route Loader - Password Encryption Utility
-==================================================
-
-This utility will encrypt your password for use in the config file.
-The encryption key will be stored securely in your home directory.
-
-Enter password to encrypt: [hidden]
-Confirm password: [hidden]
-
-✓ Password encrypted successfully!
-
-Add this line to your config.yaml file:
---------------------------------------------------
-password_encrypted: gAAAAABm...your_encrypted_password_here...
---------------------------------------------------
-```
-
-2. Create your config file:
-
-Create a `config.yaml` file (see `config.yaml.example` for reference):
-
+Create `config.yaml` with the encrypted password:
 ```yaml
-# Required settings
 file: networks.txt
 route_name: VPN Route
-
-# Gateway (choose one)
 nexthop: 192.168.1.254
-# wan_interface: wan2
-
-# Connection settings
 host: 192.168.1.1
 username: admin
+password_encrypted: gAAAAABm...your_encrypted_password...
 port: 443
 site: default
-
-# Encrypted password (from step 1)
-password_encrypted: gAAAAABm...your_encrypted_password_here...
-
-# Optional settings
 distance: 1
-list_only: false
-debug: false
 ```
 
-3. Run with the config file:
-
+Run with config file:
 ```bash
 python create_static_routes.py --config config.yaml
 ```
 
-You can override any config file setting with command line options:
+### Command Line Arguments
 
-```bash
-# Use config file but override the route name
-python create_static_routes.py --config config.yaml -r "Different Route Name"
+**Required:**
+- `-f, --file`: Text file with networks in CIDR notation (one per line)
+- `-r, --route-name`: Base name for routes (unique prefixes added automatically)
 
-# Use config file but enable debug mode
-python create_static_routes.py --config config.yaml --debug
-```
+**Gateway (choose one):**
+- `-n, --nexthop`: Next hop IP address (gateway)
+- `-w, --wan-interface`: WAN interface name (e.g., "wan", "wan2")
 
-### Basic Syntax
-
-```bash
-# Using nexthop IP address (will prompt for password)
-python create_static_routes.py -f <networks_file> -n <nexthop> -r <route_name>
-
-# Using WAN interface (with password on command line - not recommended)
-python create_static_routes.py -f <networks_file> -w <wan_interface> -r <route_name> --password <password>
-```
-
-**Security Note:** If you don't provide `--password` on the command line, the script will prompt you securely. This is the recommended approach to avoid exposing passwords in shell history.
-
-### Required Arguments
-
-- `-f, --file`: Text file containing networks in CIDR notation (one per line)
-- `-r, --route-name`: Base name for routes (unique prefixes will be appended automatically)
-
-### Gateway Options (choose one)
-
-- `-n, --nexthop`: Next hop IP address (gateway) for all routes
-- `-w, --wan-interface`: WAN interface name for all routes (e.g., "wan", "wan2")
-
-**Note:** You must specify either `--nexthop` OR `--wan-interface`, but not both.
-
-### Optional Arguments
-
+**Optional:**
 - `--config`: Path to YAML configuration file
-- `--api-key`: API key for authentication (alternative to username/password)
-- `--password`: Admin password (will prompt securely if not provided)
-- `--host`: UniFi controller hostname or IP (default: 192.168.1.1)
+- `--api-key`: API key for authentication
+- `--password`: Admin password (prompted if not provided)
+- `--host`: Controller hostname/IP (default: 192.168.1.1)
 - `--username`: Admin username (default: admin)
 - `--site`: Site name (default: default)
 - `-d, --distance`: Administrative distance (default: 1)
 - `--port`: Controller port (default: 443)
-- `--list-only`: Only list existing routes without creating new ones
-- `--remove-unused`: Find and show routes that would be removed (dry-run mode)
-- `--remove-unused-confirm`: Actually remove unused routes (DANGEROUS - cannot be undone!)
-- `--route-name-filter`: Only consider routes for removal that contain this text (safety feature)
-- `--debug`: Show detailed debug information including API requests and responses
-
-## How It Works
-
-The script automatically:
-1. **Detects controller type** - Tries both UniFi OS and Legacy API endpoints
-2. **Extracts CSRF tokens** - For UniFi OS, extracts and uses CSRF tokens from JWT cookies
-3. **Resolves interface IDs** - Converts interface names (wan2) to internal IDs
-4. **Handles authentication** - Securely prompts for passwords if not provided
-5. **Batch creates routes** - Processes all networks from your file with automatic naming
+- `--list-only`: List existing routes without creating new ones
+- `--remove-unused`: Dry-run mode - show routes that would be removed
+- `--remove-unused-confirm`: Actually remove unused routes (DANGEROUS)
+- `--route-name-filter`: Only consider routes matching this text for removal
+- `--debug`: Show detailed debug information
 
 ## Examples
 
-### Create Routes Using Nexthop IP
+### Create Routes via Nexthop
 
-1. Create a text file `networks.txt` with your networks:
-```
-10.10.0.0/24
-172.16.0.0/16
-10.20.0.0/24
-```
-
-2. Run the script (will prompt for password):
 ```bash
-python create_static_routes.py \
-  -f networks.txt \
-  -n 192.168.1.254 \
-  -r "VPN Route"
+python create_static_routes.py -f networks.txt -n 192.168.1.254 -r "VPN Route"
 ```
 
-You'll be prompted:
-```
-Password for admin@192.168.1.1: [password hidden]
-```
-
-This will create routes named (with unique prefixes based on network hash):
+Creates routes with unique prefixes:
 - "VPN Route a34d80" → 10.10.0.0/24 via 192.168.1.254
 - "VPN Route 15c144" → 172.16.0.0/16 via 192.168.1.254
-- "VPN Route 3b87d5" → 10.20.0.0/24 via 192.168.1.254
 
-The unique prefixes ensure consistent naming regardless of route order,
-preventing conflicts when adding/removing routes.
-
-### Create Routes Using WAN Interface
-
-Route traffic through a specific WAN interface (e.g., WAN2 for failover or load balancing):
+### Create Routes via WAN Interface
 
 ```bash
-python create_static_routes.py \
-  -f networks.txt \
-  -w wan2 \
-  -r "WAN2 Route" \
-  --host unifi.example.com \
-  --username admin
+python create_static_routes.py -f networks.txt -w wan2 -r "WAN2 Route"
 ```
 
-This will create interface-based routes:
-- "WAN2 Route a34d80" → 10.10.0.0/24 via interface wan2
-- "WAN2 Route 15c144" → 172.16.0.0/16 via interface wan2
-- "WAN2 Route 3b87d5" → 10.20.0.0/24 via interface wan2
+Common interface names: `wan`, `wan2`, `wan3`
 
-Common interface names:
-- `wan` - Primary WAN interface
-- `wan2` - Secondary WAN interface
-- `wan3` - Tertiary WAN interface (if available)
-
-### With Custom Controller
+### List Existing Routes
 
 ```bash
-python create_static_routes.py \
-  -f networks.txt \
-  -n 10.0.0.1 \
-  -r "Office Routes" \
-  --host 192.168.1.10 \
-  --username admin
+python create_static_routes.py --list-only --host 192.168.1.1
 ```
 
-### With Custom Distance
+### Remove Unused Routes
 
 ```bash
-python create_static_routes.py \
-  -f networks.txt \
-  -n 192.168.1.254 \
-  -r "Backup Route" \
-  -d 10
+# Preview what would be removed (dry-run)
+python create_static_routes.py -f networks.txt -n 192.168.1.254 --remove-unused
+
+# Actually remove (use with caution)
+python create_static_routes.py -f networks.txt -n 192.168.1.254 \
+  --remove-unused-confirm --route-name-filter "VPN Route"
 ```
 
-### List Existing Routes Only
+### Custom Controller and Distance
 
 ```bash
-python create_static_routes.py \
-  -f networks.txt \
-  -n 192.168.1.1 \
-  -r "Dummy" \
-  --list-only
+python create_static_routes.py -f networks.txt -n 192.168.1.254 -r "Backup" \
+  --host 192.168.1.10 -d 10
 ```
 
-### Using Password on Command Line (Not Recommended)
+## Route Management
 
-If you need to use the script in automation where prompting isn't possible:
+### Route Naming
 
+Each route is automatically assigned a unique 6-character prefix based on its network address hash:
+- Same network always gets the same prefix
+- Prevents naming conflicts
+- Consistent regardless of creation order
+
+Example: "VPN Route a34d80", "VPN Route 15c144"
+
+### Route Removal
+
+**Safety Features:**
+- Dry-run mode by default (preview changes)
+- Route name filtering (only remove matching routes)
+- Explicit confirmation required
+
+**Workflow:**
+1. Fetch existing routes
+2. Create new routes from file
+3. Identify unused routes
+4. Remove (only if confirmed)
+
+**Dry-Run Example:**
 ```bash
-python create_static_routes.py \
-  -f networks.txt \
-  -n 192.168.1.254 \
-  -r "VPN Route" \
-  --password "your_password"
+python create_static_routes.py -f networks.txt -n 192.168.1.254 \
+  --remove-unused --route-name-filter "VPN Route"
 ```
 
-**Warning:** Passwords on command line may be visible in process lists and shell history.
-
-### Using API Key Authentication
-
-Using an API key is the most secure method and recommended for automation:
-
+**Actual Removal:**
 ```bash
-python create_static_routes.py \
-  -f networks.txt \
-  -n 192.168.1.254 \
-  -r "VPN Route" \
-  --host 192.168.77.1 \
-  --api-key LoTQgF3A2Hspj_7BPkGmyqJ1DNrkH6-n
+python create_static_routes.py -f networks.txt -n 192.168.1.254 \
+  --remove-unused-confirm --route-name-filter "VPN Route"
 ```
 
-Or better yet, use a config file with the API key:
+## Authentication Methods
+
+Listed from most to least secure:
+
+### 1. API Key (Most Secure)
+
+Generate in controller: **Settings** → **Admins & Users** → **API**
 
 ```yaml
-file: networks.txt
-route_name: VPN Route
-nexthop: 192.168.1.254
-host: 192.168.77.1
-api_key: LoTQgF3A2Hspj_7BPkGmyqJ1DNrkH6-n
+api_key: your_api_key_here
 ```
 
-Then run:
-```bash
-python create_static_routes.py --config config.yaml
-```
+Benefits: No password storage, easy rotation, safe for automation
 
-## Route Removal and Management
-
-### NEW: Remove Unused Routes
-
-The script now supports removing static routes that are no longer defined in your networks file. This is useful for cleanup when you've removed networks from your VPN or changed routing requirements.
-
-**🔒 Safety Features:**
-- **Dry-run mode by default** - Shows what would be removed without actually doing it
-- **Route name filtering** - Only considers routes matching a specific pattern
-- **Clear warnings** - Explicit confirmation required for actual removal
-
-#### Workflow Order (Important!)
-
-The script follows this safe order of operations:
-1. **Fetch all existing routes** from the controller
-2. **Load new networks** from your file and create missing routes (if requested)
-3. **Find unused routes** that exist but aren't in your networks file
-4. **Remove unused routes** (only if confirmed)
-
-This ensures you don't accidentally remove routes that are still being used.
-
-#### Dry-Run Mode (Safe Preview)
-
-Check which routes would be removed without actually removing them:
-
-```bash
-# Basic dry-run - shows all routes that would be removed
-python create_static_routes.py \
-  -f networks.txt \
-  -n 192.168.1.254 \
-  --remove-unused
-
-# Dry-run with safety filter - only show "VPN Route" routes that would be removed
-python create_static_routes.py \
-  -f networks.txt \
-  -n 192.168.1.254 \
-  --remove-unused \
-  --route-name-filter "VPN Route"
-```
-
-Example output:
-```
-============================================================
-ROUTE REMOVAL ANALYSIS
-============================================================
-Found 2 route(s) that are no longer defined in networks.txt:
-  - VPN Route 3: 10.30.0.0 via nexthop 192.168.1.254 (ID: route-id-123)
-  - Legacy Route 1: 172.16.99.0 via nexthop 192.168.1.254 (ID: route-id-456)
-
-💡 DRY RUN MODE - No routes were actually removed
-   To actually remove these routes, use --remove-unused-confirm
-   WARNING: Route removal cannot be undone!
-============================================================
-```
-
-#### Actually Remove Routes (Use with Caution)
-
-⚠️ **WARNING: Route removal cannot be undone! Test with dry-run first.**
-
-```bash
-# Remove unused routes (DANGEROUS)
-python create_static_routes.py \
-  -f networks.txt \
-  -n 192.168.1.254 \
-  --remove-unused-confirm
-
-# Safer: Remove only routes matching a specific pattern
-python create_static_routes.py \
-  -f networks.txt \
-  -n 192.168.1.254 \
-  --remove-unused-confirm \
-  --route-name-filter "VPN Route"
-```
-
-#### Route-Only Removal (No Creation)
-
-Remove unused routes without creating new ones:
-
-```bash
-# Remove unused routes only (no route creation)
-# Just omit the --route-name parameter
-python create_static_routes.py \
-  -f networks.txt \
-  -n 192.168.1.254 \
-  --remove-unused-confirm \
-  --route-name-filter "Old VPN"
-```
-
-#### Complete Route Management Workflow
-
-Update your routing configuration by creating new routes and removing old ones:
-
-```bash
-# 1. First, see what would change (dry-run)
-python create_static_routes.py \
-  -f networks.txt \
-  -n 192.168.1.254 \
-  -r "VPN Route" \
-  --remove-unused \
-  --route-name-filter "VPN Route"
-
-# 2. If the changes look correct, apply them
-python create_static_routes.py \
-  -f networks.txt \
-  -n 192.168.1.254 \
-  -r "VPN Route" \
-  --remove-unused-confirm \
-  --route-name-filter "VPN Route"
-```
-
-#### Configuration File Support
-
-Add route removal options to your config file:
-
-```yaml
-# Standard configuration
-file: networks.txt
-route_name: VPN Route
-nexthop: 192.168.1.254
-host: 192.168.1.1
-api_key: your-api-key
-
-# Route removal options (NEW)
-remove_unused: false                    # Dry-run mode
-remove_unused_confirm: false           # Actually remove (set to true to enable)
-route_name_filter: VPN Route          # Safety filter - only consider matching routes
-```
-
-Then run:
-```bash
-# Dry-run with config file
-python create_static_routes.py --config config.yaml
-
-# Enable actual removal by overriding config
-python create_static_routes.py --config config.yaml --remove-unused-confirm
-```
-
-#### Safety Best Practices
-
-1. **Always test with dry-run first** (`--remove-unused`)
-2. **Use route name filters** (`--route-name-filter "VPN Route"`) to avoid removing unrelated routes
-3. **Backup your configuration** - Export your UniFi settings before making changes
-4. **Test in a lab environment** if possible
-5. **Start small** - Test with a few routes before doing bulk operations
-
-## Networks File Format
-
-Create a text file with one network per line in CIDR notation:
-
-```
-# This is a comment - lines starting with # are ignored
-10.10.0.0/24
-172.16.0.0/16
-192.168.100.0/24
-
-# Empty lines are also ignored
-10.20.0.0/22
-```
-
-## Authentication Security
-
-The script offers multiple authentication methods, listed from most to least secure:
-
-### 1. API Key Authentication (Most Secure)
-
-Use API keys generated through the UniFi controller interface:
-
-```bash
-python create_static_routes.py --config config.yaml --api-key LoTQgF3A2Hspj_7BPkGmyqJ1DNrkH6-n
-```
-
-Or in your config file:
-```yaml
-api_key: LoTQgF3A2Hspj_7BPkGmyqJ1DNrkH6-n
-```
-
-**Benefits:**
-- No password storage required
-- Fine-grained access control through the UniFi controller
-- Easy to rotate or revoke without changing passwords
-- Works with UniFi OS (UDM, UDM-Pro, etc.)
-- Safe to use in automation scripts
-
-**To generate an API key:**
-1. Log into your UniFi controller web interface
-2. Navigate to **Settings** → **Admins & Users** → **API**
-3. Click **Create New API Key**
-4. Copy the generated key and use it in your config file or command line
-
-### 2. Encrypted Password in Config File (Secure for Automation)
-
-Use the `encrypt_password.py` utility to generate an encrypted password:
+### 2. Encrypted Password
 
 ```bash
 python encrypt_password.py
 ```
 
-Add the encrypted password to your config file:
-
+Add to config:
 ```yaml
-password_encrypted: gAAAAABm...encrypted_string_here...
+password_encrypted: gAAAAABm...encrypted_string...
 ```
 
-**Security Notes:**
-- The encryption key is stored in `~/.unifi_route_loader.key` with 0600 permissions
-- Only works on the same system with the same encryption key
-- Safe to commit the config file (with encrypted password) to version control
-- Do NOT commit the `.key` file to version control
+Security: Encryption key stored in `~/.unifi_route_loader.key` (mode 0600)
 
-### 3. Interactive Password Prompt (Secure for Manual Use)
+### 3. Interactive Password Prompt
 
-Simply omit the password from both command line and config file:
+Omit password from config/command line - script will prompt securely
 
 ```bash
-python create_static_routes.py --config config.yaml
+python create_static_routes.py -f networks.txt -n 192.168.1.254 -r "VPN"
 # Will prompt: Password for admin@192.168.1.1:
 ```
 
-This method prevents passwords from appearing in:
-- Shell command history
-- Process listings
-- Log files
-- Screen captures
-
-### 4. Plain Text Password (Least Secure - Not Recommended)
+### 4. Plain Text (Not Recommended)
 
 For testing only:
-
-```bash
-# Command line (visible in history and process list)
-python create_static_routes.py -f networks.txt -n 192.168.1.254 -r "VPN" --password mypassword
-
-# Config file (visible to anyone with file access)
+```yaml
 password: mypassword
 ```
 
-**Warning:** Only use this for testing. Passwords will be visible in command history, process listings, and files.
+## Networks File Format
 
-## Command Line Help
-
-View all available options:
-```bash
-python create_static_routes.py --help
+One network per line in CIDR notation:
 ```
+# Comments start with #
+10.10.0.0/24
+172.16.0.0/16
+192.168.100.0/24
 
-## Notes
-
-- The script disables SSL certificate verification by default for self-signed certificates
-- Routes are automatically named with unique prefixes derived from the network address (e.g., "VPN Route a34d80")
-- Each network always receives the same unique prefix, preventing naming conflicts
-- All routes from the file will use the same nexthop gateway or interface
-- The script logs in and out automatically
-- Empty lines and comments (starting with #) in the networks file are ignored
-- **Password Security:** By default, the script prompts for passwords securely without echoing to the terminal. This prevents passwords from appearing in:
-  - Shell command history
-  - Process listings (ps, top, etc.)
-  - Log files
-  - Screen captures
+# Empty lines are ignored
+10.20.0.0/22
+```
 
 ## Troubleshooting
 
-### 401 Unauthorized Errors
+### 401 Unauthorized
 
-The most common cause is using a Ubiquiti cloud/SSO account instead of a local account. **The API requires a local account.**
+Most common cause: Using Ubiquiti cloud/SSO account instead of local account.
 
-**Quick Fix:**
+**Solution:**
 1. Go to Settings → System → Advanced (UniFi OS) or Settings → Admins (Legacy)
 2. Create a local admin account
 3. Use that account with the script
@@ -604,17 +266,59 @@ The most common cause is using a Ubiquiti cloud/SSO account instead of a local a
 See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for detailed steps.
 
 ### Connection Issues
-- Verify controller hostname/IP is correct
+- Verify controller hostname/IP
 - Ensure port 443 is accessible
 - Check firewall rules
 
 ### Authentication Fails
-- Verify username and password are correct
-- Ensure the user has admin privileges
-- Check that the site name matches your UniFi site
+- Verify username and password
+- Ensure account has admin privileges
+- Confirm site name is correct
+- Check that 2FA is not enabled (API doesn't support 2FA)
 
 ### Route Creation Fails
-- Verify networks in file are in valid CIDR notation
-- Ensure the nexthop IP is reachable from the UniFi gateway
-- Check that routes don't conflict with existing routes
-- Verify the networks file exists and is readable
+- Verify networks use valid CIDR notation
+- Ensure nexthop IP is reachable from gateway
+- Check for conflicting routes
+- Verify file exists and is readable
+
+## Production Best Practices
+
+1. **Use API keys** for automation and production
+2. **Use encrypted passwords** if API keys aren't available
+3. **Never commit** plain text passwords or encryption keys to version control
+4. **Always test with dry-run** before removing routes
+5. **Use route name filters** to prevent accidental deletion
+6. **Backup your configuration** before making changes
+7. **Start with small batches** before bulk operations
+8. **Monitor route creation** in the UniFi controller UI
+9. **Test in a lab** environment first if possible
+10. **Keep the script updated** to the latest version
+
+## How It Works
+
+The script automatically:
+1. Detects controller type (UniFi OS vs Legacy)
+2. Extracts CSRF tokens for UniFi OS
+3. Resolves interface names to internal IDs
+4. Handles authentication securely
+5. Batch creates routes with duplicate detection
+6. Generates consistent unique route identifiers
+
+## Help
+
+```bash
+python create_static_routes.py --help
+```
+
+## License
+
+MIT License - Copyright (c) 2026 UniFi Static Route Manager Contributors
+
+## Notes
+
+- SSL verification disabled by default for self-signed certificates
+- Script automatically logs in and out
+- All routes from file use the same gateway/interface
+- Empty lines and comments (#) in networks file are ignored
+- Password prompts are secure (no terminal echo)

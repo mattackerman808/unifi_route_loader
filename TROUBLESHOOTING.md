@@ -1,5 +1,7 @@
 # Troubleshooting 401 Unauthorized Errors
 
+Copyright (c) 2026 UniFi Static Route Manager Contributors
+
 ## Updated Script
 The script has been updated to automatically detect and support both:
 - **Legacy UniFi Controllers** (using `/api/login`)
