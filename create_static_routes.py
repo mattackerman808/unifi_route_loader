@@ -13,6 +13,7 @@ import getpass
 import base64
 import yaml
 import os
+import hashlib
 from cryptography.fernet import Fernet
 from typing import Optional, Dict, List
 
@@ -670,6 +671,31 @@ def read_networks_from_file(filename: str) -> List[str]:
         sys.exit(1)
 
 
+def generate_route_prefix(network: str) -> str:
+    """
+    Generate a unique prefix for a route based on the network address.
+    Uses a short hash of the network to ensure uniqueness and consistency.
+
+    Args:
+        network: Network address in CIDR notation (e.g., '10.0.0.0/24')
+
+    Returns:
+        Unique 6-character alphanumeric prefix (e.g., 'a3f9d2')
+
+    Examples:
+        >>> generate_route_prefix('10.0.0.0/24')
+        'a3f9d2'
+        >>> generate_route_prefix('192.168.1.0/24')
+        'b7e4c1'
+    """
+    # Create SHA256 hash of the network string
+    hash_obj = hashlib.sha256(network.encode('utf-8'))
+    # Take first 6 characters of the hex digest
+    prefix = hash_obj.hexdigest()[:6]
+    return prefix
+
+
+
 def get_encryption_key() -> bytes:
     """
     Get or create encryption key for password encryption
@@ -797,6 +823,16 @@ Examples:
   # Remove unused routes with safety filter (only routes containing "VPN Route")
   %(prog)s -f networks.txt -n 192.168.1.254 --remove-unused-confirm --route-name-filter "VPN Route"
 
+Route Naming:
+  Each route is automatically named using the base name plus a unique 6-character prefix
+  derived from the network address. For example:
+    - Base name: "VPN Route"
+    - Network: 10.0.0.0/24 → Route name: "VPN Route a3f9d2"
+    - Network: 192.168.1.0/24 → Route name: "VPN Route b7e4c1"
+
+  This ensures consistent naming and prevents conflicts when adding/removing routes
+  in any order. The same network will always get the same unique prefix.
+
 Configuration:
   You must specify either --nexthop (IP address) or --wan-interface (interface name)
   Password will be prompted securely if not provided via --password
@@ -818,7 +854,7 @@ Route Removal Safety:
     parser.add_argument('-f', '--file',
                         help='Text file containing networks in CIDR notation (one per line)')
     parser.add_argument('-r', '--route-name', dest='route_name',
-                        help='Base name for routes (will append numbers: "Name 1", "Name 2", etc.)')
+                        help='Base name for routes (unique prefix will be added: "Name a3f9d2", "Name b7e4c1", etc.)')
 
     # Gateway options (mutually exclusive group)
     gateway_group = parser.add_mutually_exclusive_group()
@@ -1045,8 +1081,10 @@ Route Removal Safety:
                 print(f"Base route name: '{args.route_name}'")
                 print(f"Administrative distance: {args.distance}\n")
 
-                for idx, network in enumerate(networks, start=1):
-                    route_name = f"{args.route_name} {idx}"
+                for network in networks:
+                    # Generate unique prefix for this network
+                    route_prefix = generate_route_prefix(network)
+                    route_name = f"{args.route_name} {route_prefix}"
                     result = controller.create_static_route(
                         network=network,
                         name=route_name,

@@ -15,7 +15,7 @@ The script automatically detects your controller type and uses the correct API e
 - **Remove unused static routes** (not defined in the networks file)
 - List existing static routes
 - Support for self-signed certificates
-- Batch route creation with automatic numbering
+- Batch route creation with unique prefix generation
 - **Dry-run mode for safe route removal preview**
 - **Route name filtering for safe removal operations**
 - Command-line interface
@@ -169,7 +169,7 @@ python create_static_routes.py -f <networks_file> -w <wan_interface> -r <route_n
 ### Required Arguments
 
 - `-f, --file`: Text file containing networks in CIDR notation (one per line)
-- `-r, --route-name`: Base name for routes (numbers will be appended automatically)
+- `-r, --route-name`: Base name for routes (unique prefixes will be appended automatically)
 
 ### Gateway Options (choose one)
 
@@ -227,10 +227,13 @@ You'll be prompted:
 Password for admin@192.168.1.1: [password hidden]
 ```
 
-This will create routes named:
-- "VPN Route 1" → 10.10.0.0/24 via 192.168.1.254
-- "VPN Route 2" → 172.16.0.0/16 via 192.168.1.254
-- "VPN Route 3" → 10.20.0.0/24 via 192.168.1.254
+This will create routes named (with unique prefixes based on network hash):
+- "VPN Route a34d80" → 10.10.0.0/24 via 192.168.1.254
+- "VPN Route 15c144" → 172.16.0.0/16 via 192.168.1.254
+- "VPN Route 3b87d5" → 10.20.0.0/24 via 192.168.1.254
+
+The unique prefixes ensure consistent naming regardless of route order,
+preventing conflicts when adding/removing routes.
 
 ### Create Routes Using WAN Interface
 
@@ -246,9 +249,9 @@ python create_static_routes.py \
 ```
 
 This will create interface-based routes:
-- "WAN2 Route 1" → 10.10.0.0/24 via interface wan2
-- "WAN2 Route 2" → 172.16.0.0/16 via interface wan2
-- "WAN2 Route 3" → 10.20.0.0/24 via interface wan2
+- "WAN2 Route a34d80" → 10.10.0.0/24 via interface wan2
+- "WAN2 Route 15c144" → 172.16.0.0/16 via interface wan2
+- "WAN2 Route 3b87d5" → 10.20.0.0/24 via interface wan2
 
 Common interface names:
 - `wan` - Primary WAN interface
@@ -576,7 +579,8 @@ python create_static_routes.py --help
 ## Notes
 
 - The script disables SSL certificate verification by default for self-signed certificates
-- Routes are automatically named with sequential numbers (e.g., "VPN Route 1", "VPN Route 2")
+- Routes are automatically named with unique prefixes derived from the network address (e.g., "VPN Route a34d80")
+- Each network always receives the same unique prefix, preventing naming conflicts
 - All routes from the file will use the same nexthop gateway or interface
 - The script logs in and out automatically
 - Empty lines and comments (starting with #) in the networks file are ignored
