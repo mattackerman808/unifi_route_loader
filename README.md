@@ -12,9 +12,12 @@ The script automatically detects your controller type and uses the correct API e
 
 - Authenticate with UniFi Controller (username/password or API key)
 - Create static routes from a text file with CIDR notation
+- **Remove unused static routes** (not defined in the networks file)
 - List existing static routes
 - Support for self-signed certificates
 - Batch route creation with automatic numbering
+- **Dry-run mode for safe route removal preview**
+- **Route name filtering for safe removal operations**
 - Command-line interface
 - Configuration file support with encrypted passwords or API keys
 
@@ -186,6 +189,9 @@ python create_static_routes.py -f <networks_file> -w <wan_interface> -r <route_n
 - `-d, --distance`: Administrative distance (default: 1)
 - `--port`: Controller port (default: 443)
 - `--list-only`: Only list existing routes without creating new ones
+- `--remove-unused`: Find and show routes that would be removed (dry-run mode)
+- `--remove-unused-confirm`: Actually remove unused routes (DANGEROUS - cannot be undone!)
+- `--route-name-filter`: Only consider routes for removal that contain this text (safety feature)
 - `--debug`: Show detailed debug information including API requests and responses
 
 ## How It Works
@@ -321,6 +327,151 @@ Then run:
 ```bash
 python create_static_routes.py --config config.yaml
 ```
+
+## Route Removal and Management
+
+### NEW: Remove Unused Routes
+
+The script now supports removing static routes that are no longer defined in your networks file. This is useful for cleanup when you've removed networks from your VPN or changed routing requirements.
+
+**🔒 Safety Features:**
+- **Dry-run mode by default** - Shows what would be removed without actually doing it
+- **Route name filtering** - Only considers routes matching a specific pattern
+- **Clear warnings** - Explicit confirmation required for actual removal
+
+#### Workflow Order (Important!)
+
+The script follows this safe order of operations:
+1. **Fetch all existing routes** from the controller
+2. **Load new networks** from your file and create missing routes (if requested)
+3. **Find unused routes** that exist but aren't in your networks file
+4. **Remove unused routes** (only if confirmed)
+
+This ensures you don't accidentally remove routes that are still being used.
+
+#### Dry-Run Mode (Safe Preview)
+
+Check which routes would be removed without actually removing them:
+
+```bash
+# Basic dry-run - shows all routes that would be removed
+python create_static_routes.py \
+  -f networks.txt \
+  -n 192.168.1.254 \
+  --remove-unused
+
+# Dry-run with safety filter - only show "VPN Route" routes that would be removed
+python create_static_routes.py \
+  -f networks.txt \
+  -n 192.168.1.254 \
+  --remove-unused \
+  --route-name-filter "VPN Route"
+```
+
+Example output:
+```
+============================================================
+ROUTE REMOVAL ANALYSIS
+============================================================
+Found 2 route(s) that are no longer defined in networks.txt:
+  - VPN Route 3: 10.30.0.0 via nexthop 192.168.1.254 (ID: route-id-123)
+  - Legacy Route 1: 172.16.99.0 via nexthop 192.168.1.254 (ID: route-id-456)
+
+💡 DRY RUN MODE - No routes were actually removed
+   To actually remove these routes, use --remove-unused-confirm
+   WARNING: Route removal cannot be undone!
+============================================================
+```
+
+#### Actually Remove Routes (Use with Caution)
+
+⚠️ **WARNING: Route removal cannot be undone! Test with dry-run first.**
+
+```bash
+# Remove unused routes (DANGEROUS)
+python create_static_routes.py \
+  -f networks.txt \
+  -n 192.168.1.254 \
+  --remove-unused-confirm
+
+# Safer: Remove only routes matching a specific pattern
+python create_static_routes.py \
+  -f networks.txt \
+  -n 192.168.1.254 \
+  --remove-unused-confirm \
+  --route-name-filter "VPN Route"
+```
+
+#### Route-Only Removal (No Creation)
+
+Remove unused routes without creating new ones:
+
+```bash
+# Remove unused routes only (no route creation)
+# Just omit the --route-name parameter
+python create_static_routes.py \
+  -f networks.txt \
+  -n 192.168.1.254 \
+  --remove-unused-confirm \
+  --route-name-filter "Old VPN"
+```
+
+#### Complete Route Management Workflow
+
+Update your routing configuration by creating new routes and removing old ones:
+
+```bash
+# 1. First, see what would change (dry-run)
+python create_static_routes.py \
+  -f networks.txt \
+  -n 192.168.1.254 \
+  -r "VPN Route" \
+  --remove-unused \
+  --route-name-filter "VPN Route"
+
+# 2. If the changes look correct, apply them
+python create_static_routes.py \
+  -f networks.txt \
+  -n 192.168.1.254 \
+  -r "VPN Route" \
+  --remove-unused-confirm \
+  --route-name-filter "VPN Route"
+```
+
+#### Configuration File Support
+
+Add route removal options to your config file:
+
+```yaml
+# Standard configuration
+file: networks.txt
+route_name: VPN Route
+nexthop: 192.168.1.254
+host: 192.168.1.1
+api_key: your-api-key
+
+# Route removal options (NEW)
+remove_unused: false                    # Dry-run mode
+remove_unused_confirm: false           # Actually remove (set to true to enable)
+route_name_filter: VPN Route          # Safety filter - only consider matching routes
+```
+
+Then run:
+```bash
+# Dry-run with config file
+python create_static_routes.py --config config.yaml
+
+# Enable actual removal by overriding config
+python create_static_routes.py --config config.yaml --remove-unused-confirm
+```
+
+#### Safety Best Practices
+
+1. **Always test with dry-run first** (`--remove-unused`)
+2. **Use route name filters** (`--route-name-filter "VPN Route"`) to avoid removing unrelated routes
+3. **Backup your configuration** - Export your UniFi settings before making changes
+4. **Test in a lab environment** if possible
+5. **Start small** - Test with a few routes before doing bulk operations
 
 ## Networks File Format
 

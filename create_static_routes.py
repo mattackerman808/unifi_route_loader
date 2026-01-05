@@ -561,6 +561,81 @@ class UniFiController:
             print(f"✗ Error deleting route: {e}")
             return False
 
+    def find_routes_to_remove(self,
+                            desired_networks: List[str],
+                            nexthop: Optional[str] = None,
+                            interface: Optional[str] = None,
+                            route_name_pattern: Optional[str] = None) -> List[Dict]:
+        """
+        Find static routes that exist but are not in the desired networks list
+
+        Args:
+            desired_networks: List of networks that should exist (CIDR notation)
+            nexthop: Next hop IP to match against (for nexthop routes)
+            interface: Interface name to match against (for interface routes)
+            route_name_pattern: Optional pattern to match route names (e.g., "VPN Route")
+
+        Returns:
+            List of route dictionaries that should be removed
+        """
+        all_routes = self.list_static_routes()
+        if not all_routes:
+            return []
+
+        # Get interface ID if using interface-based routing
+        interface_id = None
+        if interface:
+            interface_id = self.get_interface_id(interface)
+            if not interface_id:
+                print(f"✗ Could not find interface '{interface}' for comparison")
+                return []
+
+        routes_to_remove = []
+
+        for route in all_routes:
+            if route.get('type') != 'static-route':
+                continue
+
+            route_type = route.get('static-route_type', '')
+            route_name = route.get('name', '')
+            route_network = route.get('static-route_network', '')
+
+            # Skip routes that don't match our criteria
+            # If route_name_pattern is specified, only consider routes that match
+            if route_name_pattern and route_name_pattern not in route_name:
+                continue
+
+            should_keep = False
+
+            # Check nexthop-based routes
+            if nexthop and route_type == 'nexthop-route':
+                route_nexthop = route.get('static-route_nexthop', '')
+                if route_nexthop == nexthop:
+                    # Check if this route's network is in our desired networks
+                    for desired_network in desired_networks:
+                        # For nexthop routes, compare network address only
+                        desired_addr = desired_network.split('/')[0] if '/' in desired_network else desired_network
+                        if route_network == desired_addr:
+                            should_keep = True
+                            break
+
+            # Check interface-based routes
+            elif interface and route_type == 'interface-route':
+                route_interface = route.get('static-route_interface', '')
+                if route_interface == interface_id:
+                    # Check if this route's network is in our desired networks
+                    for desired_network in desired_networks:
+                        # For interface routes, compare full CIDR
+                        if route_network == desired_network:
+                            should_keep = True
+                            break
+
+            # If route should not be kept, add it to removal list
+            if not should_keep and (nexthop or interface):
+                routes_to_remove.append(route)
+
+        return routes_to_remove
+
     @staticmethod
     def _prefix_to_netmask(prefix_len: int) -> str:
         """Convert CIDR prefix length to netmask"""
@@ -710,10 +785,28 @@ Examples:
   # Using a config file
   %(prog)s --config config.yaml
 
+  # List existing routes only (no modifications)
+  %(prog)s --list-only --host 192.168.1.1
+
+  # Check which routes would be removed (dry-run mode)
+  %(prog)s -f networks.txt -n 192.168.1.254 -r "VPN Route" --remove-unused
+
+  # Actually remove unused routes (DANGEROUS - cannot be undone!)
+  %(prog)s -f networks.txt -n 192.168.1.254 -r "VPN Route" --remove-unused-confirm
+
+  # Remove unused routes with safety filter (only routes containing "VPN Route")
+  %(prog)s -f networks.txt -n 192.168.1.254 --remove-unused-confirm --route-name-filter "VPN Route"
+
 Configuration:
   You must specify either --nexthop (IP address) or --wan-interface (interface name)
   Password will be prompted securely if not provided via --password
   Config file can contain all command line options in YAML format
+
+Route Removal Safety:
+  - Default behavior is dry-run mode (--remove-unused shows what would be removed)
+  - Use --remove-unused-confirm to actually remove routes
+  - Use --route-name-filter to only consider routes with specific names
+  - Route removal follows this order: fetch routes → load new ones → remove unused
         """
     )
 
@@ -751,6 +844,12 @@ Configuration:
                         help='Controller port (default: 443)')
     parser.add_argument('--list-only', action='store_true',
                         help='Only list existing routes without creating new ones')
+    parser.add_argument('--remove-unused', action='store_true',
+                        help='Remove static routes not defined in the networks file (dry-run by default)')
+    parser.add_argument('--remove-unused-confirm', action='store_true',
+                        help='Actually remove unused routes (disables dry-run mode)')
+    parser.add_argument('--route-name-filter',
+                        help='Only consider routes for removal that contain this text in their name (e.g., "VPN Route")')
     parser.add_argument('--debug', action='store_true',
                         help='Show detailed debug information including API responses')
 
@@ -770,6 +869,9 @@ Configuration:
         'distance': 1,
         'port': 443,
         'list_only': False,
+        'remove_unused': False,
+        'remove_unused_confirm': False,
+        'route_name_filter': None,
         'debug': False,
     }
 
@@ -801,19 +903,35 @@ Configuration:
         final_config['port'] = args.port
     if args.list_only:
         final_config['list_only'] = args.list_only
+    if args.remove_unused:
+        final_config['remove_unused'] = args.remove_unused
+    if args.remove_unused_confirm:
+        final_config['remove_unused_confirm'] = args.remove_unused_confirm
+    if args.route_name_filter is not None:
+        final_config['route_name_filter'] = args.route_name_filter
     if args.debug:
         final_config['debug'] = args.debug
 
     # Validate required arguments
-    if 'file' not in final_config:
+    if 'file' not in final_config and not final_config.get('list_only'):
         print("✗ Error: --file is required (or specify in config file)")
         sys.exit(1)
-    if 'route_name' not in final_config:
+    if 'route_name' not in final_config and not final_config.get('list_only'):
         print("✗ Error: --route-name is required (or specify in config file)")
         sys.exit(1)
-    if 'nexthop' not in final_config and 'wan_interface' not in final_config:
+    if ('nexthop' not in final_config and 'wan_interface' not in final_config and
+        not final_config.get('list_only')):
         print("✗ Error: Either --nexthop or --wan-interface is required (or specify in config file)")
         sys.exit(1)
+
+    # Validate remove-unused requirements
+    if final_config.get('remove_unused') or final_config.get('remove_unused_confirm'):
+        if 'file' not in final_config:
+            print("✗ Error: --file is required when using --remove-unused")
+            sys.exit(1)
+        if 'nexthop' not in final_config and 'wan_interface' not in final_config:
+            print("✗ Error: Either --nexthop or --wan-interface is required when using --remove-unused")
+            sys.exit(1)
 
     # Convert to namespace for backward compatibility
     class Config:
@@ -832,20 +950,24 @@ Configuration:
         args.api_key = None
     if not hasattr(args, 'password'):
         args.password = None
+    if not hasattr(args, 'route_name_filter'):
+        args.route_name_filter = None
 
     # Prompt for password if not provided and not using API key
-    if not args.password and not args.api_key:
+    if not args.password and not args.api_key and not args.list_only:
         args.password = getpass.getpass(f"Password for {args.username}@{args.host}: ")
 
-    # Read networks from file
-    print(f"Reading networks from '{args.file}'...")
-    networks = read_networks_from_file(args.file)
+    # Read networks from file if needed
+    networks = []
+    if hasattr(args, 'file') and args.file:
+        print(f"Reading networks from '{args.file}'...")
+        networks = read_networks_from_file(args.file)
 
-    if not networks:
-        print("✗ No networks found in file")
-        sys.exit(1)
+        if not networks and not args.list_only:
+            print("✗ No networks found in file")
+            sys.exit(1)
 
-    print(f"Found {len(networks)} network(s) to process")
+        print(f"Found {len(networks)} network(s) to process")
 
     # Initialize controller connection
     controller = UniFiController(
@@ -886,10 +1008,19 @@ Configuration:
                     print("  - Account lacks permission to view routes")
                     print("  - Wrong site name (current: {})".format(args.site))
         else:
-            # Determine gateway type
+            # Standard operation: create routes and/or remove unused ones
+            should_create_routes = networks and hasattr(args, 'route_name') and args.route_name
+            should_remove_routes = args.remove_unused or args.remove_unused_confirm
+
+            if not should_create_routes and not should_remove_routes:
+                print("✗ Nothing to do. Specify routes to create or use --remove-unused")
+                sys.exit(1)
+
+            # Determine gateway type for display
+            gateway_display = ""
             if args.wan_interface:
                 gateway_display = f"interface: {args.wan_interface}"
-            else:
+            elif args.nexthop:
                 gateway_display = f"nexthop: {args.nexthop}"
 
             # Pre-fetch data once for performance optimization
@@ -905,33 +1036,93 @@ Configuration:
                     print(f"✗ Could not find interface '{args.wan_interface}'")
                     sys.exit(1)
 
-            # Create routes for each network
-            print(f"\nCreating routes with {gateway_display}")
-            print(f"Base route name: '{args.route_name}'")
-            print(f"Administrative distance: {args.distance}\n")
-
             success_count = 0
             skipped_count = 0
-            for idx, network in enumerate(networks, start=1):
-                route_name = f"{args.route_name} {idx}"
-                result = controller.create_static_route(
-                    network=network,
-                    name=route_name,
+
+            # Create routes for each network (if requested)
+            if should_create_routes:
+                print(f"\nCreating routes with {gateway_display}")
+                print(f"Base route name: '{args.route_name}'")
+                print(f"Administrative distance: {args.distance}\n")
+
+                for idx, network in enumerate(networks, start=1):
+                    route_name = f"{args.route_name} {idx}"
+                    result = controller.create_static_route(
+                        network=network,
+                        name=route_name,
+                        nexthop=args.nexthop,
+                        interface=args.wan_interface,
+                        distance=args.distance,
+                        cached_routes=cached_routes,
+                        cached_interface_id=cached_interface_id
+                    )
+                    if result:
+                        if result.get('skipped'):
+                            skipped_count += 1
+                        else:
+                            success_count += 1
+
+                print(f"\n✓ Successfully created {success_count}/{len(networks)} route(s)")
+                if skipped_count > 0:
+                    print(f"⊘ Skipped {skipped_count} duplicate route(s)")
+
+            # Handle route removal if requested
+            if should_remove_routes:
+                print(f"\n" + "="*60)
+                print("ROUTE REMOVAL ANALYSIS")
+                print("="*60)
+
+                # Find routes that should be removed
+                routes_to_remove = controller.find_routes_to_remove(
+                    desired_networks=networks,
                     nexthop=args.nexthop,
                     interface=args.wan_interface,
-                    distance=args.distance,
-                    cached_routes=cached_routes,
-                    cached_interface_id=cached_interface_id
+                    route_name_pattern=args.route_name_filter
                 )
-                if result:
-                    if result.get('skipped'):
-                        skipped_count += 1
-                    else:
-                        success_count += 1
 
-            print(f"\n✓ Successfully created {success_count}/{len(networks)} route(s)")
-            if skipped_count > 0:
-                print(f"⊘ Skipped {skipped_count} duplicate route(s)")
+                if not routes_to_remove:
+                    print("✓ No unused routes found to remove")
+                else:
+                    print(f"Found {len(routes_to_remove)} route(s) that are no longer defined in {args.file}:")
+
+                    for route in routes_to_remove:
+                        route_type = route.get('static-route_type', 'unknown')
+                        route_name = route.get('name', 'Unknown')
+                        route_network = route.get('static-route_network', '')
+                        route_id = route.get('_id', '')
+
+                        if route_type == 'interface-route':
+                            via = f"interface {route.get('static-route_interface')}"
+                        else:
+                            via = f"nexthop {route.get('static-route_nexthop')}"
+
+                        print(f"  - {route_name}: {route_network} via {via} (ID: {route_id})")
+
+                        if args.debug:
+                            print(f"    Full route data: {json.dumps(route, indent=6)}")
+
+                    # Determine if this is a dry run or actual removal
+                    if args.remove_unused_confirm:
+                        print(f"\n⚠️  REMOVING {len(routes_to_remove)} route(s) - THIS CANNOT BE UNDONE!")
+
+                        removed_count = 0
+                        for route in routes_to_remove:
+                            route_id = route.get('_id')
+                            route_name = route.get('name', 'Unknown')
+
+                            if controller.delete_static_route(route_id):
+                                removed_count += 1
+                            else:
+                                print(f"✗ Failed to remove route: {route_name}")
+
+                        print(f"\n✓ Successfully removed {removed_count}/{len(routes_to_remove)} route(s)")
+
+                    else:
+                        print(f"\n💡 DRY RUN MODE - No routes were actually removed")
+                        print(f"   To actually remove these routes, use --remove-unused-confirm")
+                        print(f"   WARNING: Route removal cannot be undone!")
+
+                print("="*60)
 
     finally:
         # Logout

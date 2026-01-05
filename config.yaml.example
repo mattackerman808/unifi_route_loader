@@ -40,3 +40,12 @@ distance: 1
 # Optional Flags
 list_only: false
 debug: false
+
+# Route Removal Options (NEW)
+# Remove static routes not defined in the networks file
+remove_unused: false
+# Actually remove routes (disables dry-run mode) - USE WITH CAUTION!
+remove_unused_confirm: false
+# Only consider routes for removal that contain this text in their name
+# This is a safety feature to prevent accidental removal of unrelated routes
+route_name_filter: VPN Route
